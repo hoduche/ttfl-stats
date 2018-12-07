@@ -1,0 +1,4 @@
+Notepad++ with JSON Viewer
+Python via Anaconda and Jupyter
+Git
+WinMerge
