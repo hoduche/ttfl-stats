@@ -1,4 +1,4 @@
 Notepad++ with JSON Viewer
-Python via Anaconda and Jupyter
+Python via Anaconda + Jupyter + Json + Requests + Pandas
 Git
 WinMerge
