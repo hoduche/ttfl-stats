@@ -1,4 +1,6 @@
-ExercicesEric/
-__pycache__/
+.idea/
 .ipynb_checkpoints/
+__pycache__/
+ExercicesEric/
+GoldenOutput/
 *.ipynb
