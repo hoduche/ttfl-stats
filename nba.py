@@ -5,11 +5,17 @@ import json
 import pathlib
 
 from dateutil import parser
-import requests
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import pylab
 import pytz
+import requests
+import six
+from twython import Twython
 
 from constants import nba_headers
+from auth import (consumer_key, consumer_secret, access_token, access_token_secret)
 
 
 def __sanity_check(verbose=False):
@@ -46,6 +52,30 @@ def __build_game_url(gameId, startPeriod=0, endPeriod=14, startRange=0, endRange
     parameters = ('gameId=' + gameId + '&startPeriod=0&endPeriod=14&startRange=0&endRange=2147483647&rangeType=0')
     game_url = domain + '/' + endpoint + '/?' + parameters
     return game_url
+
+
+# https://stackoverflow.com/questions/26678467/export-a-pandas-dataframe-as-a-table-image
+def __render_mpl_table(data, col_width=3.3, row_height=0.625, font_size=12,
+                     header_color='#40466e', row_colors=['#f1f1f2', 'w'], edge_color='black',
+                     bbox=[0, 0, 1, 1], header_columns=0, ax=None, **kwargs):
+    if ax is None:
+        size = (np.array(data.shape[::-1]) + np.array([0, 1])) * np.array([col_width, row_height])
+        fig, ax = plt.subplots(figsize=size)
+        ax.axis('off')
+
+    mpl_table = ax.table(cellText=data.values, bbox=bbox, colLabels=data.columns, **kwargs)
+
+    mpl_table.auto_set_font_size(False)
+    mpl_table.set_fontsize(font_size)
+
+    for k, cell in  six.iteritems(mpl_table._cells):
+        cell.set_edgecolor(edge_color)
+        if k[0] == 0 or k[1] < header_columns:
+            cell.set_text_props(weight='bold', color='w')
+            cell.set_facecolor(header_color)
+        else:
+            cell.set_facecolor(row_colors[k[0]%len(row_colors) ])
+    return ax
 
 
 def get_nba_schedule(year, verbose=False):
@@ -152,4 +182,13 @@ if __name__ == '__main__':
     arg_parser.add_argument('-v', '--verbose', action='store_true', help='display logs when activated')
     args = arg_parser.parse_args()
     day_ttfl = compute_ttfl_statistics(args.date, args.verbose)
-    day_ttfl.head(30).to_html('ttfl_output.html')
+
+    output = __render_mpl_table(day_ttfl.reset_index().head(10))
+    pylab.savefig('ttfl_output.png', bbox_inches='tight')
+    twitter = Twython(consumer_key, consumer_secret, access_token, access_token_secret)
+    message = 'TTFL totals for ' + str(__get_eastern_date(args.date))
+    with open('ttfl_output.png', 'rb') as photo:
+        response = twitter.upload_media(media=photo)
+    twitter.update_status(status=message, media_ids=[response['media_id']])
+
+    day_ttfl.head(30).reset_index().to_html('ttfl_output.html')
