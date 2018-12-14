@@ -1,6 +1,10 @@
 .idea/
 .ipynb_checkpoints/
 __pycache__/
+DataLake/
+DataWareHouse/
 ExercicesEric/
 GoldenOutput/
+WorkHo/
 *.ipynb
+auth.py
