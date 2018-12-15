@@ -9,3 +9,4 @@ WorkHo/
 *.ipynb
 auth.py
 ttfl_output*
+*.pyc

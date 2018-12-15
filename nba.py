@@ -2,13 +2,13 @@ import argparse
 import collections
 import datetime as dt
 import json
-import pathlib
+import pylab
 
 from dateutil import parser
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import pylab
+import pathlib
 import pytz
 import requests
 import six
