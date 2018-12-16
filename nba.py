@@ -163,13 +163,17 @@ def compute_ttfl_statistics(eastern_date_string=None, verbose=False):
             json.dump(boxscore_json_v1, boxscore_json_v1_cached)
         if verbose:
             print('Compute TTFL totals for game ' + game_id + ' from boxscore v1')
-        series_list = [pd.to_numeric(pd.Series(each_result), errors='coerce') for each_result in boxscore_json_v1['stats']['activePlayers']]
-        df = pd.DataFrame(series_list)
-        game_ttfl_v1 = pd.DataFrame(df['personId']).rename(columns={'personId': 'PLAYER_ID'})
-        game_ttfl_v1['TOTAL_V1'] = df.points + df.totReb + df.assists + df.steals + df['blocks'] - df.turnovers + 2 * df.fgm \
-                                   - df.fga + 2 * df.tpm - df.tpa + 2 * df.ftm - df.fta
-        games_ttfl_v1.append(game_ttfl_v1)
-    day_ttfl_v1 = pd.concat(games_ttfl_v1)
+        if 'stats' in boxscore_json_v1.keys():
+            series_list = [pd.to_numeric(pd.Series(each_result), errors='coerce') for each_result in boxscore_json_v1['stats']['activePlayers']]
+            df = pd.DataFrame(series_list)
+            game_ttfl_v1 = pd.DataFrame(df['personId']).rename(columns={'personId': 'PLAYER_ID'})
+            game_ttfl_v1['TOTAL_V1'] = df.points + df.totReb + df.assists + df.steals + df['blocks'] - df.turnovers + 2 * df.fgm \
+                                    - df.fga + 2 * df.tpm - df.tpa + 2 * df.ftm - df.fta
+            games_ttfl_v1.append(game_ttfl_v1)
+    if games_ttfl_v1:
+        day_ttfl_v1 = pd.concat(games_ttfl_v1).fillna(0)
+        numeric_columns = ['PLAYER_ID', 'TOTAL_V1']
+        day_ttfl_v1[numeric_columns] = day_ttfl_v1[numeric_columns].astype(int)
 
     games_ttfl_v2 = []
     for each_game in get_nba_schedule(year, verbose)[eastern_date.strftime('%Y%m%d')]:
@@ -193,14 +197,18 @@ def compute_ttfl_statistics(eastern_date_string=None, verbose=False):
                                            - df.FGA + 2 * df.FG3M - df.FG3A + 2 * df.FTM - df.FTA
                 games_ttfl_v2.append(game_ttfl_v2)
                 break
-    day_ttfl_v2 = pd.concat(games_ttfl_v2)
+    day_ttfl_v2 = pd.concat(games_ttfl_v2).fillna(0)
+    numeric_columns = ['PLAYER_ID', 'TOTAL_V2']
+    day_ttfl_v2[numeric_columns] = day_ttfl_v2[numeric_columns].astype(int)
 
-    day_ttfl = pd.merge(day_ttfl_v1, day_ttfl_v2, on='PLAYER_ID').fillna(0)
-    numeric_columns = ['PLAYER_ID', 'TOTAL_V1', 'TOTAL_V2']
-    day_ttfl[numeric_columns] = day_ttfl[numeric_columns].astype(int)
-    day_ttfl = day_ttfl[['PLAYER_ID', 'PLAYER_NAME', 'TOTAL_V1', 'TOTAL_V2']]
-    day_ttfl = day_ttfl.sort_values(['TOTAL_V1'], ascending=[0])
-    day_ttfl = day_ttfl.set_index('PLAYER_ID')
+    if games_ttfl_v1:
+        day_ttfl = pd.merge(day_ttfl_v1, day_ttfl_v2, on='PLAYER_ID', how='left')
+        day_ttfl = day_ttfl[['PLAYER_ID', 'PLAYER_NAME', 'TOTAL_V1', 'TOTAL_V2']]
+        day_ttfl = day_ttfl.sort_values(['TOTAL_V1'], ascending=[0])
+        day_ttfl = day_ttfl.set_index('PLAYER_ID')
+    else:
+        day_ttfl = day_ttfl_v2
+        day_ttfl = day_ttfl.set_index('PLAYER_ID')
 
     if verbose:
         print('Save TTFL totals for the ' + str(len(day_ttfl_v2)) + ' games on '+ eastern_date.strftime('%Y/%m/%d') + ' to DataWareHouse')
