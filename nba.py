@@ -46,18 +46,26 @@ def __get_season_start_year(date=None):
         return date.year
 
 
-def __build_game_url(gameId, startPeriod=0, endPeriod=14, startRange=0, endRange=2147483647, rangeType=0):
+def __build_game_url_v1(gameId, eastern_date):
+    domain = 'http://data.nba.net'
+    endpoint = 'prod/v1'
+    extension = '_boxscore.json'
+    game_url = domain + '/' + endpoint + '/' + eastern_date.strftime('%Y%m%d') + '/' + gameId + extension
+    return game_url
+
+
+def __build_game_url_v2(gameId):
     domain = 'https://stats.nba.com'
     endpoint = 'stats/boxscoretraditionalv2'
-    parameters = ('gameId=' + gameId + '&startPeriod=0&endPeriod=14&startRange=0&endRange=2147483647&rangeType=0')
+    parameters = 'gameId=' + gameId + '&startPeriod=0&endPeriod=14&startRange=0&endRange=2147483647&rangeType=0'
     game_url = domain + '/' + endpoint + '/?' + parameters
     return game_url
 
 
-# https://stackoverflow.com/questions/26678467/export-a-pandas-dataframe-as-a-table-image
 def __render_mpl_table(data, col_width=3.3, row_height=0.625, font_size=12,
                      header_color='#40466e', row_colors=['#f1f1f2', 'w'], edge_color='black',
                      bbox=[0, 0, 1, 1], header_columns=0, ax=None, **kwargs):
+# https://stackoverflow.com/questions/26678467/export-a-pandas-dataframe-as-a-table-image
     if ax is None:
         size = (np.array(data.shape[::-1]) + np.array([0, 1])) * np.array([col_width, row_height])
         fig, ax = plt.subplots(figsize=size)
@@ -96,10 +104,10 @@ def get_nba_schedule(year, verbose=False):
 
     __sanity_check(verbose)
 
-    if pathlib.Path('DataWarehouse/schedule' + str(year) + '_dict.json').is_file():
+    if pathlib.Path('DataWarehouse/schedule_' + str(year) + '_dict.json').is_file():
         if verbose:
             print('Load season ' + str(year) + '/' + str(year+1) + ' schedule from DataWarehouse')
-        with open('DataWarehouse/schedule' + str(year) + '_dict.json', 'r') as schedule_dict_cached:
+        with open('DataWarehouse/schedule_' + str(year) + '_dict.json', 'r') as schedule_dict_cached:
             schedule_dict = json.loads(schedule_dict_cached.read())
     else:
         if verbose:
@@ -109,15 +117,15 @@ def get_nba_schedule(year, verbose=False):
         schedule_json = json.loads(response.text)
         if verbose:
             print('Save season ' + str(year) + '/' + str(year+1) + ' schedule to DataLake')
-        with open('DataLake/schedule' + str(year) + '.json', 'w+') as schedule_json_cached:
+        with open('DataLake/schedule_' + str(year) + '.json', 'w+') as schedule_json_cached:
             json.dump(schedule_json, schedule_json_cached)
         schedule_dict = collections.defaultdict(list)
         for each_game in schedule_json['league']['standard']:
-            eastern_date = str(parser.parse(each_game['startDateEastern']).date())  # str forced by json
+            eastern_date = parser.parse(each_game['startDateEastern']).strftime('%Y%m%d')  # str forced by json
             schedule_dict[eastern_date].append((each_game['gameId'], each_game['startTimeUTC']))
         if verbose:
             print('Save season ' + str(year) + '/' + str(year+1) + ' schedule to DataWarehouse')
-        with open('DataWarehouse/schedule' + str(year) + '_dict.json', 'w+') as schedule_dict_cached:
+        with open('DataWarehouse/schedule_' + str(year) + '_dict.json', 'w+') as schedule_dict_cached:
             json.dump(schedule_dict, schedule_dict_cached)
 
     return schedule_dict
@@ -139,37 +147,65 @@ def compute_ttfl_statistics(eastern_date_string=None, verbose=False):
         pandas dataframe -- ranking of daily players with their ttfl total
     """
 
-    __sanity_check(verbose)
-
     eastern_date = __get_eastern_date(eastern_date_string)
     year = __get_season_start_year(eastern_date)
-    games_ttfl = []
-    for each_game in get_nba_schedule(year, verbose)[str(eastern_date)]:
+
+    games_ttfl_v1 = []
+    for each_game in get_nba_schedule(year, verbose)[eastern_date.strftime('%Y%m%d')]:
         game_id = each_game[0]
-        game_url = __build_game_url(game_id)
+        game_url_v1 = __build_game_url_v1(game_id, eastern_date)
         if verbose:
-            print('Download game ' + game_id + ' boxscore from NBA website')
-        boxscore_json = json.loads(requests.get(game_url, headers=nba_headers).text)
+            print('Download game ' + game_id + ' boxscore v1 from NBA website')
+        boxscore_json_v1 = json.loads(requests.get(game_url_v1, headers=nba_headers).text)
         if verbose:
-            print('Save game ' + game_id + ' boxscore to DataLake')
-        with open('DataLake/boxscore' + game_id + '.json', 'w+') as boxscore_json_cached:
-            json.dump(boxscore_json, boxscore_json_cached)
+            print('Save game ' + game_id + ' boxscore v1 to DataLake')
+        with open('DataLake/boxscore_' + game_id + '_v1.json', 'w+') as boxscore_json_v1_cached:
+            json.dump(boxscore_json_v1, boxscore_json_v1_cached)
         if verbose:
-            print('Compute TTFL totals for game ' + game_id)
-        for each_result in boxscore_json['resultSets']:
+            print('Compute TTFL totals for game ' + game_id + ' from boxscore v1')
+        series_list = [pd.to_numeric(pd.Series(each_result), errors='coerce') for each_result in boxscore_json_v1['stats']['activePlayers']]
+        df = pd.DataFrame(series_list)
+        game_ttfl_v1 = pd.DataFrame(df['personId']).rename(columns={'personId': 'PLAYER_ID'})
+        game_ttfl_v1['TOTAL_V1'] = df.points + df.totReb + df.assists + df.steals + df['blocks'] - df.turnovers + 2 * df.fgm \
+                                   - df.fga + 2 * df.tpm - df.tpa + 2 * df.ftm - df.fta
+        games_ttfl_v1.append(game_ttfl_v1)
+    day_ttfl_v1 = pd.concat(games_ttfl_v1)
+
+    games_ttfl_v2 = []
+    for each_game in get_nba_schedule(year, verbose)[eastern_date.strftime('%Y%m%d')]:
+        game_id = each_game[0]
+        game_url_v2 = __build_game_url_v2(game_id)
+        if verbose:
+            print('Download game ' + game_id + ' boxscore v2 from NBA website')
+        boxscore_json_v2 = json.loads(requests.get(game_url_v2, headers=nba_headers).text)
+        if verbose:
+            print('Save game ' + game_id + ' boxscore v2 to DataLake')
+        with open('DataLake/boxscore_' + game_id + '_v2.json', 'w+') as boxscore_json_v2_cached:
+            json.dump(boxscore_json_v2, boxscore_json_v2_cached)
+        if verbose:
+            print('Compute TTFL totals for game ' + game_id + ' from boxscore v2')
+        series_list = []
+        for each_result in boxscore_json_v2['resultSets']:
             if each_result['name'] == 'PlayerStats':
                 df = pd.DataFrame(each_result['rowSet'], columns=each_result['headers'])
-                ttfl = pd.DataFrame(df.PTS + df.REB + df.AST + df.STL + df.BLK - df.TO + 2 * df.FGM
-                                    - df.FGA + 2 * df.FG3M - df.FG3A + 2 * df.FTM - df.FTA, columns=['TOTAL'])
-                ttfl = ttfl.set_index(df.PLAYER_NAME)
-                games_ttfl.append(ttfl)
+                game_ttfl_v2 = df[['PLAYER_ID', 'PLAYER_NAME']].copy()
+                game_ttfl_v2['TOTAL_V2'] = df.PTS + df.REB + df.AST + df.STL + df.BLK - df.TO + 2 * df.FGM \
+                                           - df.FGA + 2 * df.FG3M - df.FG3A + 2 * df.FTM - df.FTA
+                games_ttfl_v2.append(game_ttfl_v2)
                 break
-    day_ttfl = pd.concat(games_ttfl)
-    day_ttfl = day_ttfl.sort_values(['TOTAL'], ascending=[0])
+    day_ttfl_v2 = pd.concat(games_ttfl_v2)
+
+    day_ttfl = pd.merge(day_ttfl_v1, day_ttfl_v2, on='PLAYER_ID').fillna(0)
+    numeric_columns = ['PLAYER_ID', 'TOTAL_V1', 'TOTAL_V2']
+    day_ttfl[numeric_columns] = day_ttfl[numeric_columns].astype(int)
+    day_ttfl = day_ttfl[['PLAYER_ID', 'PLAYER_NAME', 'TOTAL_V1', 'TOTAL_V2']]
+    day_ttfl = day_ttfl.sort_values(['TOTAL_V1'], ascending=[0])
+    day_ttfl = day_ttfl.set_index('PLAYER_ID')
+
     if verbose:
-        print('Save TTFL totals for the ' + str(len(games_ttfl)) + ' games on '+ str(eastern_date) + ' to DataWareHouse')
-    with open('DataWarehouse/ttfl-' + str(eastern_date) + '.json', 'w+') as day_ttfl_cached:
-        json.dump(day_ttfl.to_dict(), day_ttfl_cached)
+        print('Save TTFL totals for the ' + str(len(day_ttfl_v2)) + ' games on '+ eastern_date.strftime('%Y/%m/%d') + ' to DataWareHouse')
+    with open('DataWarehouse/ttfl_' + eastern_date.strftime('%Y%m%d') + '.json', 'w+') as day_ttfl_cached:
+        json.dump(day_ttfl.to_json(orient='values'), day_ttfl_cached)
 
     return day_ttfl
 
@@ -183,10 +219,11 @@ if __name__ == '__main__':
     args = arg_parser.parse_args()
     day_ttfl = compute_ttfl_statistics(args.date, args.verbose)
 
-    output = __render_mpl_table(day_ttfl.reset_index().head(10))
+    output = __render_mpl_table(day_ttfl.head(30))
     pylab.savefig('ttfl_output.png', bbox_inches='tight')
+
     twitter = Twython(consumer_key, consumer_secret, access_token, access_token_secret)
-    message = 'TTFL totals for ' + str(__get_eastern_date(args.date))
+    message = 'TTFL totals for ' + __get_eastern_date(args.date).strftime('%Y/%m/%d')
     with open('ttfl_output.png', 'rb') as photo:
         response = twitter.upload_media(media=photo)
     twitter.update_status(status=message, media_ids=[response['media_id']])
