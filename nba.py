@@ -66,6 +66,10 @@ def __render_mpl_table(data, col_width=3.3, row_height=0.625, font_size=12,
                      header_color='#40466e', row_colors=['#f1f1f2', 'w'], edge_color='black',
                      bbox=[0, 0, 1, 1], header_columns=0, ax=None, **kwargs):
 # https://stackoverflow.com/questions/26678467/export-a-pandas-dataframe-as-a-table-image
+    if data.size == 0:
+        one_row = pd.DataFrame([[0, '', 0]], columns=['PLAYER_ID', 'PLAYER_NAME', 'TOTAL_V2'])
+        data = pd.concat([data, one_row])
+
     if ax is None:
         size = (np.array(data.shape[::-1]) + np.array([0, 1])) * np.array([col_width, row_height])
         fig, ax = plt.subplots(figsize=size)
